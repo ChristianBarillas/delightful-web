@@ -23,7 +23,7 @@ export default function ImmersiveSlide({
   useEffect(() => {
     if (videoRef.current) {
       if (isActive) {
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().catch(() => { });
       } else {
         videoRef.current.pause();
         videoRef.current.currentTime = 0; // Reset for next view
@@ -32,13 +32,13 @@ export default function ImmersiveSlide({
   }, [isActive]);
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-black">
+    <div className="relative w-full h-[100dvh] overflow-hidden bg-black">
       {/* Video Background */}
       <motion.div
         initial={{ opacity: 0, scale: 1.1 }}
-        animate={{ 
-            opacity: 1, 
-            scale: isActive ? 1.0 : 1.1 
+        animate={{
+          opacity: 1,
+          scale: isActive ? 1.0 : 1.1
         }}
         transition={{ duration: 1.5, ease: "easeOut" }}
         className="absolute inset-0 z-0"
@@ -55,10 +55,10 @@ export default function ImmersiveSlide({
           <source src={videoSrc} type="video/mp4" />
           {/* Add WebM if available, but MP4 is primary */}
         </video>
-        
+
         {/* Loading Overlay (fades out when video loads) */}
         {!isLoaded && (
-            <div className="absolute inset-0 bg-black z-10" />
+          <div className="absolute inset-0 bg-black z-10" />
         )}
       </motion.div>
 
