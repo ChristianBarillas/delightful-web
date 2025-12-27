@@ -1,100 +1,173 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, usePresence } from "framer-motion";
 import { ChevronRight, ChevronLeft, Volume2, VolumeX, Play } from "lucide-react";
 
-// --- SUB-COMPONENT FOR AUDIO CONTROL ---
-// This handles the "Mute on Exit" logic via useEffect cleanup
+// --- HELPERS ---
+
+const TEXT_VARIANTS = {
+  hidden: { y: 100, opacity: 0 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }
+  }
+};
+
+const STAGGER_CONTAINER = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05, delayChildren: 0.2 } // Faster stagger for "Robust" feel
+  }
+};
+
+const AnimatedText = ({ text, className }: { text: string, className?: string }) => {
+  const words = text.split(" ");
+  return (
+    <motion.div
+      className={`flex flex-wrap gap-x-[0.2em] ${className}`}
+      variants={STAGGER_CONTAINER}
+      initial="hidden"
+      animate="visible"
+    >
+      {words.map((word, i) => (
+        <motion.span key={i} variants={TEXT_VARIANTS} className="inline-block origin-top-left">
+          {word}
+        </motion.span>
+      ))}
+    </motion.div>
+  );
+};
+
+// --- SLIDE ITEM WITH AUDIO CROSSFADE & 3D DEPTH ---
 const SlideItem = ({ data, hasStarted, isMuted }: { data: any, hasStarted: boolean, isMuted: boolean }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [isPresent, safeToRemove] = usePresence(); // MAGIC HOOK for Crossfade
 
+  // --- AUDIO CROSSFADE LOGIC ---
   useEffect(() => {
-    // When this component UNMOUNTS (starts animating out), strictly MUTE the video.
-    // This prevents audio overlap during the 0.5s transition.
-    return () => {
-      if (videoRef.current) {
-        videoRef.current.muted = true;
+    if (!hasStarted) return;
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (isPresent) {
+      // FADE IN
+      video.volume = 0;
+      if (!isMuted) {
+        let vol = 0;
+        const fadeIn = setInterval(() => {
+          if (!video) { clearInterval(fadeIn); return; }
+          vol = Math.min(vol + 0.05, 1);
+          video.volume = vol;
+          if (vol >= 1) clearInterval(fadeIn);
+        }, 50); // 1s fade in
+        return () => clearInterval(fadeIn);
       }
-    };
-  }, []);
-
-  // Also sync mute state while mounted
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.muted = !hasStarted || isMuted;
+    } else {
+      // FADE OUT (Exit)
+      if (!isMuted) {
+        let vol = video.volume;
+        const fadeOut = setInterval(() => {
+          if (!video) {
+            clearInterval(fadeOut);
+            safeToRemove(); // Force remove if ref lost
+            return;
+          }
+          vol = Math.max(vol - 0.1, 0); // Fast Fade Out (0.5s approx)
+          video.volume = vol;
+          if (vol <= 0) {
+            clearInterval(fadeOut);
+            safeToRemove(); // TELLS REACT: "OK to remove me now"
+          }
+        }, 30);
+        return () => clearInterval(fadeOut);
+      } else {
+        safeToRemove(); // Immediate remove if muted
+      }
     }
-  }, [hasStarted, isMuted]);
+  }, [isPresent, hasStarted, safeToRemove, isMuted]);
+
+  // Sync Mute toggle while playing
+  useEffect(() => {
+    if (videoRef.current && isPresent) {
+      videoRef.current.muted = !hasStarted || isMuted;
+      // Reset volume to 1 if unmuting mid-playback
+      if (hasStarted && !isMuted) videoRef.current.volume = 1;
+    }
+  }, [isMuted, hasStarted, isPresent]);
 
   return (
-    <div className="relative w-full h-full">
-      {/* Video with Ken Burns Effect */}
-      <motion.div
-        className="absolute inset-0 w-full h-full"
-        animate={{ scale: 1.1 }}
-        transition={{ duration: 20, ease: "linear" }}
-      >
+    <div className="relative w-full h-full overflow-hidden">
+      {/* 3D Container */}
+      <div className="absolute inset-0 w-full h-full">
         <video
           ref={videoRef}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-cover scale-105" // Slight overscale for parallax
           src={data.video}
           poster={data.poster}
           autoPlay
           loop
-          muted={!hasStarted || isMuted}
+          muted={!hasStarted || isMuted} // Init state
           playsInline
         />
-      </motion.div>
+        {/* Heavy Gradient for text readability */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent" />
+      </div>
 
-      {/* Cinematic Scrim */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/50" />
-
-      {/* Text Overlay */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 z-10 pointer-events-none pb-32">
-        <motion.div
-          className="pointer-events-auto"
-          initial={{ y: 80, opacity: 0, filter: "blur(20px)" }}
-          animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
-          transition={{ delay: 0.3, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        >
+      {/* "THE MONOLITH" Layout: Left Aligned, Massive */}
+      <div className="absolute inset-0 flex flex-col justify-end md:justify-center p-8 md:pl-24 pb-32 md:pb-0 z-20 pointer-events-none">
+        <div className="max-w-4xl pointer-events-auto">
           {data.id === 0 ? (
             <>
-              <p className="text-xl md:text-2xl font-light uppercase tracking-[0.4em] mb-6 opacity-80 text-[#d4af37]">Portfolio 2024</p>
-              <h1 className="text-7xl md:text-[10rem] font-extrabold tracking-tighter leading-[0.85] mb-6 drop-shadow-2xl">
-                Delightful<br /><span className="text-transparent bg-clip-text bg-gradient-to-b from-[#d4af37] to-[#8a6e15]">{data.highlight}</span>.
-              </h1>
-              <p className="text-lg opacity-60 tracking-widest uppercase">Excellence in Motion.</p>
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: 100 }}
+                transition={{ duration: 0.8 }}
+                className="h-1 bg-[#d4af37] mb-8"
+              />
+              <p className="text-[#d4af37] tracking-[0.5em] uppercase font-light mb-4">Portfolio 2024</p>
+              <AnimatedText
+                text={data.title}
+                className="text-7xl md:text-[9rem] font-black uppercase leading-[0.8] tracking-tighter mb-4 text-white drop-shadow-2xl"
+              />
+              <AnimatedText
+                text={data.highlight}
+                className="text-7xl md:text-[9rem] font-black uppercase leading-[0.8] tracking-tighter mb-8 text-transparent bg-clip-text bg-gradient-to-r from-[#d4af37] to-[#8a6e15]"
+              />
             </>
           ) : (
             <>
-              <div className="w-[1px] bg-[#d4af37] h-20 mx-auto mb-10 hidden md:block opacity-50" />
-              <h2 className="text-5xl md:text-8xl font-bold mb-8 max-w-5xl drop-shadow-lg leading-tight">
-                {data.title}
+              <h2 className="text-5xl md:text-8xl font-black uppercase leading-[0.9] tracking-tight mb-8 drop-shadow-lg">
+                <AnimatedText text={data.title} />
               </h2>
-              <p className="text-lg md:text-2xl font-light opacity-80 max-w-3xl leading-relaxed mx-auto text-shadow-sm font-serif italic">
-                "{data.desc}"
+              <motion.div
+                className="w-20 h-1 bg-[#d4af37] mb-8"
+                initial={{ width: 0 }}
+                animate={{ width: 80 }}
+                transition={{ delay: 0.5 }}
+              />
+              <p className="text-xl md:text-2xl font-light leading-relaxed max-w-2xl opacity-90 text-gray-200">
+                {data.desc}
               </p>
             </>
           )}
 
-          {/* Final Contact Button */}
           {data.isLast && (
-            <motion.div
-              className="mt-12"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+            <motion.a
+              href="https://delightfulservices.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-12 px-12 py-5 bg-[#d4af37] hover:bg-white text-black font-bold tracking-widest uppercase transition-all shadow-[0_10px_30px_rgba(0,0,0,0.5)] hover:shadow-[0_0_40px_rgba(212,175,55,0.6)]"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
             >
-              <a
-                href="https://delightfulservices.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-12 py-5 bg-[#d4af37] text-black font-bold tracking-widest uppercase text-sm rounded-full hover:bg-white transition-all shadow-[0_0_40px_rgba(212,175,55,0.4)]"
-              >
-                Visit Website
-              </a>
-            </motion.div>
+              Visit Website
+            </motion.a>
           )}
-        </motion.div>
+        </div>
       </div>
     </div>
   );
@@ -106,7 +179,7 @@ export default function Home() {
   const [isMuted, setIsMuted] = useState(false);
   const totalSlides = 7;
 
-  // Content Data
+  // --- DATA ---
   const slides = [
     {
       id: 0,
@@ -120,42 +193,48 @@ export default function Home() {
       id: 1,
       video: "/videos/v2.mp4",
       poster: "/images/ramp.png",
-      title: "Seamless Accessibility.",
-      desc: "We integrate rigorous ADA compliance with high-end residential design."
+      title: "Seamless",
+      highlight: "",
+      desc: "Integrating rigorous ADA compliance with high-end residential design aesthetics."
     },
     {
       id: 2,
       video: "/videos/v3.mp4",
       poster: "/images/ramp.png",
-      title: "Custom Ramps.",
+      title: "Custom Ramps",
+      highlight: "",
       desc: "Precision-engineered wood and metal systems that blend naturally with your architecture."
     },
     {
       id: 3,
       video: "/videos/v4.mp4",
       poster: "/images/bathroom.png",
-      title: "Luxury Sanctuaries.",
-      desc: "Walk-in tubs and barrier-free showers that feel like a spa, not a clinic."
+      title: "Sanctuaries",
+      highlight: "",
+      desc: "Walk-in tubs and barrier-free showers designed for tranquility, not just utility."
     },
     {
       id: 4,
       video: "/videos/v5.mp4",
       poster: "/images/lift.png",
-      title: "Vertical Mobility.",
-      desc: "State-of-the-art stair lifts and VPL systems for challenging elevations."
+      title: "Vertical Line",
+      highlight: "",
+      desc: "State-of-the-art stair lifts and VPL systems overcoming every elevation challenge."
     },
     {
       id: 5,
       video: "/videos/v6.mp4",
       poster: "/images/deck.png",
-      title: "Decks & Living.",
-      desc: "Expand your horizon with custom multi-level decks tailored to your lifestyle."
+      title: "Decks & Living",
+      highlight: "",
+      desc: "Expanding your horizon with custom multi-level outdoor living spaces."
     },
     {
       id: 6,
       video: "/videos/v7.mp4",
       poster: "/images/deck.png",
-      title: "Let's Build.",
+      title: "Let's Build",
+      highlight: "",
       desc: "+1 470-888-2724 • lopezjc@delightfulservices.com",
       isLast: true
     },
@@ -165,45 +244,49 @@ export default function Home() {
   const getPrevIndex = (current: number) => (current - 1 + totalSlides) % totalSlides;
   const preloadIndices = [getNextIndex(slide), getPrevIndex(slide)];
 
-  // --- LUXURY ANIMATION VARIANTS (Deep Push) ---
+  // --- 3D DOORWAY TRANSITIONS ---
   const variants = {
     enter: (direction: number) => ({
-      x: direction > 0 ? "100%" : "-20%",
-      opacity: 0,
-      scale: 1.1,
+      x: direction > 0 ? "100%" : "-100%",
+      opacity: 1,
+      scale: 1.1, // Start zoomed in
+      rotateY: direction > 0 ? 45 : -45, // 3D entering angle
       zIndex: 1,
-      filter: "brightness(0.5) blur(10px)"
+      filter: "brightness(0.5)",
     }),
     center: {
       x: 0,
       opacity: 1,
       scale: 1,
+      rotateY: 0,
       zIndex: 2,
-      filter: "brightness(1) blur(0px)",
+      filter: "brightness(1)",
       transition: {
-        x: { type: "spring", stiffness: 400, damping: 40 },
+        x: { type: "spring", stiffness: 300, damping: 30 },
         opacity: { duration: 0.5 },
-        scale: { duration: 0.8, ease: "easeOut" },
-        filter: { duration: 0.5 }
+        scale: { duration: 1, ease: "easeOut" },
+        rotateY: { duration: 0.8, ease: "easeOut" }
       } as const
     },
     exit: (direction: number) => ({
-      x: direction < 0 ? "100%" : "-20%",
-      opacity: 0,
-      scale: 0.95,
+      x: direction < 0 ? "100%" : "-100%",
+      opacity: 0, // Fades out visually while audio fades logically
+      scale: 0.9, // Recedes
+      rotateY: direction < 0 ? 45 : -45, // 3D exiting angle
       zIndex: 0,
-      filter: "brightness(0.3) blur(5px)",
+      filter: "brightness(0.2)",
       transition: {
-        x: { type: "spring", stiffness: 400, damping: 40 },
-        opacity: { duration: 0.6 },
-        filter: { duration: 0.4 }
+        x: { type: "spring", stiffness: 300, damping: 30 },
+        opacity: { duration: 0.8 }, // Slower visual fade to match audio
+        scale: { duration: 0.8 },
+        rotateY: { duration: 0.8 }
       } as const
     })
   };
 
-  const paginate = useCallback((newDirection: number) => {
+  const paginate = useCallback((newDirection: number, index?: number) => {
     setSlide(([prev, currentDir]) => {
-      let next = prev + newDirection;
+      let next = index !== undefined ? index : prev + newDirection;
       if (next < 0) next = totalSlides - 1;
       if (next >= totalSlides) next = 0;
       return [next, newDirection];
@@ -213,6 +296,7 @@ export default function Home() {
   const startExperience = () => setHasStarted(true);
   const toggleMute = () => setIsMuted(!isMuted);
 
+  // --- KEYBOARD & WHEEL (Throttled) ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowRight" || e.key === "ArrowDown") paginate(1);
@@ -248,41 +332,35 @@ export default function Home() {
 
   return (
     <main
-      className="h-[100dvh] w-screen overflow-hidden bg-black text-white relative flex items-center justify-center font-sans selection:bg-[#d4af37] selection:text-black"
+      className="h-[100dvh] w-screen overflow-hidden bg-[#0a0a0a] text-white relative flex font-sans perspective-[1000px]" // Added perspective for 3D
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
 
-      {/* High Performance Preloader */}
+      {/* Smart Preloader */}
       <div className="hidden">
         {preloadIndices.map(idx => (
-          <video
-            key={`preload-${idx}`}
-            src={slides[idx].video}
-            preload="auto"
-            muted
-            playsInline
-          />
+          <video key={`preload-${idx}`} src={slides[idx].video} preload="auto" muted playsInline />
         ))}
       </div>
 
-      {/* START OVERLAY */}
+      {/* START GATE */}
       {!hasStarted && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-xl transition-opacity duration-1000">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-2xl transition-opacity duration-1000">
           <button
             onClick={startExperience}
-            className="group relative flex flex-col items-center gap-8 px-12 py-12 rounded-3xl"
+            className="group relative flex flex-col items-center gap-8"
           >
-            <div className="absolute inset-0 rounded-full bg-[#d4af37]/20 blur-3xl animate-pulse" />
-            <div className="relative w-32 h-32 rounded-full border-2 border-[#d4af37]/50 flex items-center justify-center group-hover:bg-[#d4af37] group-hover:scale-110 transition-all duration-500 shadow-[0_0_30px_rgba(212,175,55,0.3)]">
-              <Play size={48} className="ml-2 text-[#d4af37] group-hover:text-black transition-colors" />
+            <div className="absolute inset-0 rounded-full bg-[#d4af37]/20 blur-[50px] animate-pulse" />
+            <div className="relative w-32 h-32 rounded-full border border-[#d4af37]/30 flex items-center justify-center group-hover:scale-110 transition-all duration-700 bg-black/50 backdrop-blur-md">
+              <Play size={40} className="ml-2 text-[#d4af37] fill-[#d4af37]" />
             </div>
-            <span className="tracking-[0.6em] text-lg font-light text-[#d4af37] group-hover:text-white transition-colors uppercase">PORTAFOLIO</span>
+            <span className="tracking-[0.8em] text-sm font-bold text-[#d4af37] uppercase">PORTAFOLIO</span>
           </button>
         </div>
       )}
 
-      {/* BACKGROUND & SLIDES */}
+      {/* MAIN CONTENT STAGE */}
       <AnimatePresence initial={false} custom={direction} mode="popLayout">
         <motion.div
           key={slide}
@@ -291,9 +369,8 @@ export default function Home() {
           initial="enter"
           animate="center"
           exit="exit"
-          className="absolute inset-0 w-full h-full shadow-2xl will-change-transform"
+          className="absolute inset-0 w-full h-full shadow-2xl will-change-transform" // Hardware Acceleration
         >
-          {/* Use Sub-Component to manage per-slide lifecycle (Mute on Exit) */}
           <SlideItem
             data={slides[slide]}
             hasStarted={hasStarted}
@@ -302,39 +379,67 @@ export default function Home() {
         </motion.div>
       </AnimatePresence>
 
-      {/* GLASS ISLAND HUD */}
+      {/* INTERACTIVE SEGMENTED NAVIGATION */}
+      <div className="absolute top-10 left-0 right-0 z-50 flex justify-center gap-1.5 px-6 md:px-20 cursor-pointer pointer-events-auto">
+        {slides.map((s, i) => (
+          <div
+            key={i}
+            className="group h-1.5 flex-1 bg-white/10 rounded-full overflow-hidden transition-all hover:h-2"
+            onClick={() => paginate(i - slide, i)}
+          >
+            <motion.div
+              className="h-full bg-[#d4af37] shadow-[0_0_15px_#d4af37]"
+              initial={{ width: "0%" }}
+              animate={{ width: i === slide ? "100%" : "0%" }}
+              transition={{ duration: 0.3 }}
+            />
+            <div className="h-full w-full bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+        ))}
+      </div>
+
+      {/* BOTTOM CONTROL CAPSULE */}
       {hasStarted && (
         <motion.div
-          initial={{ y: 100, opacity: 0 }}
+          initial={{ y: 50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 1, type: "spring" }}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 pointer-events-auto"
+          className="absolute bottom-10 right-10 z-50 pointer-events-auto hidden md:block"
         >
-          <div className="flex items-center gap-1 p-2 rounded-full bg-white/10 backdrop-blur-xl border border-white/10 shadow-2xl">
-            <button onClick={() => paginate(-1)} className="p-4 hover:bg-white/20 rounded-full transition-colors text-white/80 hover:text-white">
-              <ChevronLeft size={24} />
+          {/* Desktop: Minimal Corner Controls */}
+          <div className="flex items-center gap-3 p-2 rounded-2xl bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl">
+            <button onClick={toggleMute} className="w-12 h-12 flex items-center justify-center rounded-xl hover:bg-white/10 transition-all text-[#d4af37]">
+              {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
             </button>
-            <div className="w-[1px] h-6 bg-white/10 mx-2" />
-            <button onClick={toggleMute} className="w-14 h-14 flex items-center justify-center rounded-full hover:bg-white/20 transition-all">
-              {isMuted ? <VolumeX size={20} className="text-white/50" /> : <Volume2 size={20} className="text-[#d4af37]" />}
+            <div className="w-[1px] h-6 bg-white/10" />
+            <button onClick={() => paginate(-1)} className="w-12 h-12 flex items-center justify-center rounded-xl hover:bg-white/10 transition-all text-white">
+              <ChevronLeft size={20} />
             </button>
-            <div className="w-[1px] h-6 bg-white/10 mx-2" />
-            <button onClick={() => paginate(1)} className="p-4 hover:bg-white/20 rounded-full transition-colors text-white/80 hover:text-white">
-              <ChevronRight size={24} />
+            <button onClick={() => paginate(1)} className="w-12 h-12 flex items-center justify-center rounded-xl hover:bg-white/10 transition-all text-white">
+              <ChevronRight size={20} />
             </button>
           </div>
         </motion.div>
       )}
 
-      {/* Progress */}
-      <div className="absolute top-0 left-0 right-0 h-[2px] bg-white/5 z-50">
-        <motion.div
-          className="h-full bg-[#d4af37] shadow-[0_0_20px_#d4af37]"
-          initial={{ width: "0%" }}
-          animate={{ width: `${((slide + 1) / totalSlides) * 100}%` }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-        />
-      </div>
+      {/* MOBILE CONTROL BAR (Bottom Sheet Style) */}
+      {hasStarted && (
+        <div className="absolute bottom-0 inset-x-0 p-6 z-50 md:hidden bg-gradient-to-t from-black via-black/80 to-transparent pb-10">
+          <div className="flex items-center justify-between">
+            <button onClick={toggleMute} className="w-12 h-12 flex items-center justify-center rounded-full bg-white/10 text-[#d4af37]">
+              {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </button>
+            <div className="flex gap-4">
+              <button onClick={() => paginate(-1)} className="w-14 h-14 flex items-center justify-center rounded-full bg-white/10 text-white active:bg-white/30">
+                <ChevronLeft size={24} />
+              </button>
+              <button onClick={() => paginate(1)} className="w-14 h-14 flex items-center justify-center rounded-full bg-[#d4af37] text-black active:scale-95 transition-transform font-bold">
+                <ChevronRight size={24} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </main>
   );

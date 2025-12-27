@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: delightful-web-deployment
+  namespace: delightful-services
+  labels:
+    app: delightful-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: delightful-web
+  strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: delightful-web
+    spec:
+      containers:
+      - name: delightful-web
+        image: ghcr.io/CHANGE_ME/delightful-web:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NEXT_TELEMETRY_DISABLED
+          value: "1"
+        resources:
+          # "Recursos reducidos super optimizado"
+          requests:
+            cpu: "10m"
+            memory: "64Mi"
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          timeoutSeconds: 10
+      imagePullSecrets:
+      - name: regcred
